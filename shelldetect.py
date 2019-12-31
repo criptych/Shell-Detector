@@ -1,6 +1,6 @@
 # encoding: utf-8
 """
- Shell Detector  v1.0 
+ Shell Detector  v1.0
  Shell Detector is released under the MIT License <http://www.opensource.org/licenses/mit-license.php>
 
  Special thanks to JetBRAINS for PyCharm license
@@ -11,13 +11,13 @@ import threading
 import sys
 import re
 import os
-import optparse
+import argparse
 import base64
 import stat
 import fnmatch
 import time
 from hashlib import md5
-import urllib2
+import urllib.request, urllib.error
 import cgi
 import datetime
 
@@ -25,19 +25,19 @@ import datetime
 class PhpSerializer(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
-        
+
     def unserialize(self, s):
-        return PhpSerializer._unserialize_var(self, s)[0]
+        return self._unserialize_var(s)[0]
 
     def _unserialize_var(self, s):
         return (
-            {'i': PhpSerializer._unserialize_int
-                , 'b': PhpSerializer._unserialize_bool
-                , 'd': PhpSerializer._unserialize_double
-                , 'n': PhpSerializer._unserialize_null
-                , 's': PhpSerializer._unserialize_string
-                , 'a': PhpSerializer._unserialize_array
-            }[s[0].lower()](self, s[2:]))
+            {'i': self._unserialize_int
+                , 'b': self._unserialize_bool
+                , 'd': self._unserialize_double
+                , 'n': self._unserialize_null
+                , 's': self._unserialize_string
+                , 'a': self._unserialize_array
+            }[s[0].lower()](s[2:]))
 
     def _unserialize_int(self, s):
         x = s.partition(';')
@@ -63,7 +63,7 @@ class PhpSerializer(threading.Thread):
         a, k, s = {}, None, s[1:]
 
         for i in range(0, int(l) * 2):
-            (v, s) = PhpSerializer._unserialize_var(self, s)
+            (v, s) = self._unserialize_var(s)
 
             if k:
                 a[k] = v
@@ -122,25 +122,25 @@ class ShellDetector(threading.Thread):
         if options.format is not None:
             self._report_format = options.format"""
 
-        self._remotefingerprint = options.remote.lower() in ("yes", "true", "t", "1")
+        self._remotefingerprint = options.remote
 
     def remote(self):
         if self._remotefingerprint is True:
             self.alert('Please note we are using remote shell database', 'yellow')
             url = 'https://raw.github.com/emposha/PHP-Shell-Detector/master/shelldetect.db'
-            self._fingerprints = urllib2.urlopen(url).read()
+            self._fingerprints = urllib.request.urlopen(url).read()
             try:
-                self._fingerprints = base64.decodestring(bytes(self._fingerprints))
+                self._fingerprints = base64.b64decode(self._fingerprints)
                 serial = PhpSerializer()
-                self._fingerprints = serial.unserialize(str(self._fingerprints))
+                self._fingerprints = serial.unserialize(self._fingerprints.decode())
             except IOError as e:
                 print("({})".format(e))
         else:
             if os.path.isfile("shelldetect.db"):
                 try:
-                    self._fingerprints = base64.decodestring(str(open('shelldetect.db', 'r').read()))
+                    self._fingerprints = base64.b64decode(open('shelldetect.db', 'rb').read())
                     serial = PhpSerializer()
-                    self._fingerprints = serial.unserialize(str(self._fingerprints))
+                    self._fingerprints = serial.unserialize(self._fingerprints.decode())
                 except IOError as e:
                     print("({})".format(e))
 
@@ -166,7 +166,7 @@ class ShellDetector(threading.Thread):
             _match = _regex.findall(_content)
             if _match:
                 self.getfileinfo(_filename)
-                if self._showlinenumbers is True:
+                if self._showlinenumbers:
                     _lines = _content.split("\n")
                     _linecounter = 1
                     for _line in _lines:
@@ -184,14 +184,14 @@ class ShellDetector(threading.Thread):
     def _get_precomputed_fingerprints(self):
         if not hasattr(self, '_precomputed_fingerprints'):
             self._precomputed_fingerprints = []
-            for fingerprint, shellname in self._fingerprints.iteritems():
+            for fingerprint, shellname in self._fingerprints.items():
                 if fingerprint == "version":
                     continue
                 if 'bb:' in fingerprint:
-                    fingerprint = base64.decodestring(bytes(fingerprint.replace('bb:', '')))
+                    fingerprint = base64.b64decode(bytes(fingerprint.replace('bb:', '')))
                 self._precomputed_fingerprints.append((re.compile(re.escape(fingerprint)), shellname))
         return self._precomputed_fingerprints
-    
+
     def fingerprint(self, _filename, _content):
         for _regex, shellname in self._get_precomputed_fingerprints():
             _match = _regex.findall(base64.b64encode(_content))
@@ -237,7 +237,8 @@ class ShellDetector(threading.Thread):
         except ValueError:
             _version = 0
         try:
-            _server_version = urllib2.urlopen('https://raw.github.com/emposha/PHP-Shell-Detector/master/version/db').read()
+            _server_version = urllib.request.urlopen('https://raw.github.com/emposha/PHP-Shell-Detector/master/version/db').read()
+            _server_version = _server_version.decode()
         except ValueError:
             _server_version = 0
 
@@ -248,8 +249,8 @@ class ShellDetector(threading.Thread):
                 self.alert('New version of shells signature database found. Please update!', 'red')
 
         try:
-            _app_server_version = urllib2.urlopen('https://raw.github.com/emposha/Shell-Detector/master/version/app').read()
-        except urllib2.HTTPError:
+            _app_server_version = urllib.request.urlopen('https://raw.github.com/emposha/Shell-Detector/master/version/app').read()
+        except urllib.error.HTTPError:
             _app_server_version = 0
 
         if _app_server_version == 0:
@@ -301,9 +302,9 @@ class ShellDetector(threading.Thread):
         }[_color]
 
         if self.supports_color() is True:
-            print _color_result + _content + '\033[0m'
+            print(_color_result + _content + '\033[0m')
         else:
-            print _content
+            print(_content)
 
         if _flag is True:
             self.output(_content, _class, _html)
@@ -337,12 +338,13 @@ class ShellDetector(threading.Thread):
             file.write(self._output)
 
 #Start
-parser = optparse.OptionParser()
-parser.add_option('--extension', '-e', type="string", default="php,txt,asp", help="file extensions that should be scanned, comma separated")
-parser.add_option('--linenumbers', '-l', default=True, help="show line number where suspicious function used")
-parser.add_option('--directory', '-d', type="string", help="specify directory to scan")
-parser.add_option('--remote', '-r', default="False", help="get shells signatures db by remote")
-(options, args) = parser.parse_args()
+parser = argparse.ArgumentParser()
+parser.add_argument('--extension', '-e', type=str, default="php,txt,asp", help="file extensions that should be scanned, comma separated")
+parser.add_argument('--linenumbers', '-l', default=True, help="show line number where suspicious function used (default)", action='store_true')
+parser.add_argument('--no-linenumbers', '-L', help="suppress line numbers where suspicious function used", action='store_false', dest='linenumbers')
+parser.add_argument('--directory', '-d', type=str, help="specify directory to scan")
+parser.add_argument('--remote', '-r', default=False, action='store_true', help="get shells signatures db by remote")
+options = parser.parse_args()
 
 if len(sys.argv) == 1:
     parser.print_usage()
